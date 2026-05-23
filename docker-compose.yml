@@ -6,12 +6,15 @@ services:
     environment:
       - FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
       - TZ=Asia/Kolkata
+      - MEDIA_BASE_URL=${MEDIA_BASE_URL:-https://media.fireeditsclub.deepanalve.dev}
+      - GCP_PROJECT=${GCP_PROJECT:-hokuai}
+      - GCP_LOCATION=${GCP_LOCATION:-us-central1}
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/firebot/secrets/vertex-sa.json
     volumes:
-      - ./data:/opt/firebot/data
-      - ./secrets:/opt/firebot/secrets:ro
-    # Run main.py every 5 minutes via supercronic-style loop.
-    # In Dokploy you can switch this to the platform's scheduled jobs feature
-    # for cleaner observability.
+      # Stable host paths that survive deploys (Dokploy wipes the compose code/ dir each time)
+      - /etc/dokploy/firebot/data:/opt/firebot/data
+      - /etc/dokploy/firebot/secrets:/opt/firebot/secrets:ro
+    # Cron-style loop: every 5 minutes run main.py and log output
     command: >
       sh -c "while true; do
                echo '[tick]' $$(date -u +%FT%TZ);
@@ -19,17 +22,13 @@ services:
                sleep 300;
              done"
 
-  # Static media server for IG Reels (Meta needs a public URL to download from).
-  # Bind-mounted to data/uploads — main.py drops a video there + the URL becomes
-  # https://media.fireeditsclub.deepanalve.dev/<filename> via Traefik.
   media:
     image: nginx:alpine
     container_name: firebot-media
     restart: unless-stopped
     volumes:
-      - ./data/uploads:/usr/share/nginx/html:ro
+      - /etc/dokploy/firebot/data/uploads:/usr/share/nginx/html:ro
     labels:
-      # Dokploy/Traefik routing — set the hostname when deploying
       - traefik.enable=true
       - traefik.http.routers.firebot-media.rule=Host(`media.fireeditsclub.deepanalve.dev`)
       - traefik.http.routers.firebot-media.entrypoints=websecure
