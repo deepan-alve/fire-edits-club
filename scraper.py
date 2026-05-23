@@ -16,9 +16,26 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import shutil
+
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "data" / "seen.sqlite"
-GALLERY_DL = Path.home() / ".local" / "bin" / "gallery-dl"
+
+
+def _find_binary(name: str, fallbacks: list[Path]) -> Path:
+    found = shutil.which(name)
+    if found:
+        return Path(found)
+    for f in fallbacks:
+        if f.exists():
+            return f
+    return fallbacks[0]
+
+
+GALLERY_DL = _find_binary("gallery-dl", [
+    Path("/usr/local/bin/gallery-dl"),
+    Path.home() / ".local" / "bin" / "gallery-dl",
+])
 SOURCE_USER = "EditsGoesHard"
 
 SCHEMA = """

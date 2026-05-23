@@ -12,6 +12,7 @@ the composer skips the song line.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import urllib.parse
@@ -21,7 +22,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 KEY_FILE = ROOT / "secrets" / "acoustid-key.txt"
-FPCALC = Path.home() / ".local" / "bin" / "fpcalc"
+
+
+def _find_fpcalc() -> Path:
+    found = shutil.which("fpcalc")
+    if found:
+        return Path(found)
+    for f in (Path("/usr/local/bin/fpcalc"), Path.home() / ".local" / "bin" / "fpcalc"):
+        if f.exists():
+            return f
+    return Path("/usr/local/bin/fpcalc")
+
+
+FPCALC = _find_fpcalc()
 
 
 @dataclass
