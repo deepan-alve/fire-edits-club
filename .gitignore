@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+
+# Credentials and tokens — NEVER commit
+secrets/
+*.token.json
+*.cookies.txt
+cookies.txt
+.env
+.env.local
+
+# Data
+data/
+*.sqlite
+*.sqlite-journal
+media/
+
+# Local
+.DS_Store
+*.swp
+*.tmp

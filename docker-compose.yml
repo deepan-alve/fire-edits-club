@@ -1,0 +1,42 @@
+services:
+  bot:
+    build: .
+    container_name: firebot
+    restart: unless-stopped
+    environment:
+      - FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./data:/opt/firebot/data
+      - ./secrets:/opt/firebot/secrets:ro
+    # Run main.py every 5 minutes via supercronic-style loop.
+    # In Dokploy you can switch this to the platform's scheduled jobs feature
+    # for cleaner observability.
+    command: >
+      sh -c "while true; do
+               echo '[tick]' $$(date -u +%FT%TZ);
+               python main.py run || echo '[tick failed]';
+               sleep 300;
+             done"
+
+  # Static media server for IG Reels (Meta needs a public URL to download from).
+  # Bind-mounted to data/uploads — main.py drops a video there + the URL becomes
+  # https://media.fireeditsclub.deepanalve.dev/<filename> via Traefik.
+  media:
+    image: nginx:alpine
+    container_name: firebot-media
+    restart: unless-stopped
+    volumes:
+      - ./data/uploads:/usr/share/nginx/html:ro
+    labels:
+      # Dokploy/Traefik routing — set the hostname when deploying
+      - traefik.enable=true
+      - traefik.http.routers.firebot-media.rule=Host(`media.fireeditsclub.deepanalve.dev`)
+      - traefik.http.routers.firebot-media.entrypoints=websecure
+      - traefik.http.routers.firebot-media.tls.certresolver=letsencrypt
+      - traefik.http.services.firebot-media.loadbalancer.server.port=80
+
+networks:
+  default:
+    name: dokploy-network
+    external: true
