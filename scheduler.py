@@ -31,7 +31,9 @@ SLOTS_IST = [
     (19, 30),
 ]
 SLOT_STREAMS = ["short_reel", "short_reel"]
-JITTER_MINUTES = 30
+# ±2 hours jitter so the bot doesn't post at exactly 08:30 / 19:30 every day.
+# Actual fire times land anywhere in [06:30-10:30] and [17:30-21:30] IST.
+JITTER_MINUTES = 120
 
 
 SCHEMA_ADDITIONS = """
