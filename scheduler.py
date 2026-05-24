@@ -23,20 +23,14 @@ DB_PATH = ROOT / "data" / "seen.sqlite"
 IST = ZoneInfo("Asia/Kolkata")
 UTC = timezone.utc
 
-# Growth schedule (5 slots/day, first 30 days then scale back):
-#   08:30 IST  short_reel  (IG Reel + YT Short cross-post — morning commute)
-#   13:00 IST  ig_only     (IG Reel only — lunch, conserve YT quota)
-#   15:30 IST  yt_long     (long-form compilation)
-#   19:30 IST  short_reel  (IG Reel + YT Short cross-post — prime time)
-#   22:30 IST  ig_only     (IG Reel only — late night scroll)
+# 2 cross-posts/day, symmetric YT + IG:
+#   08:30 IST  short_reel  (morning commute scroll)
+#   19:30 IST  short_reel  (prime-time evening)
 SLOTS_IST = [
     (8, 30),
-    (13, 0),
-    (15, 30),
     (19, 30),
-    (22, 30),
 ]
-SLOT_STREAMS = ["short_reel", "ig_only", "yt_long", "short_reel", "ig_only"]
+SLOT_STREAMS = ["short_reel", "short_reel"]
 JITTER_MINUTES = 30
 
 
