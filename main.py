@@ -346,28 +346,45 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"  #{sid}  {when_ist}  {stream:>11s}  {ref}")
 
 
-def _cleanup_old_transient(max_age_hours: int = 6) -> None:
-    """Delete transient work/upload files older than max_age_hours.
-
-    media/ and compilations/ are intentionally kept — media may be reused for
-    future compilations, compilations are kept for the yt_long stream.
+def _cleanup_storage() -> None:
+    """Tiered retention on the storage box:
+        work/         — 6 hours   (transient: intermediate transformed files)
+        uploads/      — 6 hours   (transient: IG-publish staging files, Meta downloads in <1min)
+        media/        — 30 days   (source downloads; longest tweet→post latency we'd ever see)
+        compilations/ — 60 days   (long-form output, kept for forensic/re-upload)
     """
+    import shutil
     import time
-    cutoff = time.time() - max_age_hours * 3600
-    removed = 0
-    for sub in ("work", "uploads"):
+
+    POLICIES = [
+        ("work", 6 / 24, "files"),
+        ("uploads", 6 / 24, "files"),
+        ("media", 30, "dirs"),  # media/{tweet_id}/ — delete whole subdir
+        ("compilations", 60, "dirs"),
+    ]
+    total_removed = 0
+    for sub, days, kind in POLICIES:
         d = ROOT / "data" / sub
         if not d.exists():
             continue
-        for p in d.iterdir():
+        cutoff = time.time() - days * 86400
+        removed = 0
+        for entry in d.iterdir():
             try:
-                if p.is_file() and p.stat().st_mtime < cutoff:
-                    p.unlink()
+                if entry.stat().st_mtime >= cutoff:
+                    continue
+                if kind == "files" and entry.is_file():
+                    entry.unlink()
+                    removed += 1
+                elif kind == "dirs" and entry.is_dir():
+                    shutil.rmtree(entry)
                     removed += 1
             except OSError:
                 pass
-    if removed:
-        print(f"cleanup: removed {removed} transient file(s) older than {max_age_hours}h")
+        if removed:
+            unit = "file" if kind == "files" else "dir"
+            print(f"cleanup: removed {removed} {sub}/ {unit}(s) older than {days}d")
+            total_removed += removed
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -375,7 +392,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     cmd_scrape(argparse.Namespace(n=30))
     cmd_schedule(argparse.Namespace(hours=48))
     cmd_publish_due(args)
-    _cleanup_old_transient()
+    _cleanup_storage()
 
 
 def main() -> None:
