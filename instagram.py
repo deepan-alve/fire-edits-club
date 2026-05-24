@@ -177,6 +177,25 @@ def upload_reel(video_path: Path, caption: str) -> str:
     return media_id
 
 
+def post_comment(media_id: str, message: str) -> str | None:
+    """Post a comment on a published IG media (used for first-comment hashtag dump).
+
+    Requires the `instagram_manage_comments` scope (we granted it in OAuth).
+    Returns the comment_id on success, None on failure (non-fatal).
+    """
+    creds = _load_creds()
+    page_token = creds["page_access_token"]
+    try:
+        resp = _graph_post(
+            f"/{media_id}/comments",
+            {"message": message, "access_token": page_token},
+        )
+        return resp.get("id")
+    except GraphError as e:
+        print(f"  ⚠ first-comment failed (non-fatal): {e}")
+        return None
+
+
 def smoke_test() -> None:
     if len(sys.argv) < 2:
         sys.exit("usage: python instagram.py <video.mp4>")

@@ -25,7 +25,7 @@ import scraper
 import compose
 import compile as compilemod
 from downloader import download_tweet_media
-from instagram import upload_reel
+from instagram import upload_reel, post_comment
 from transformer import transform
 from youtube import upload as upload_yt
 
@@ -136,7 +136,8 @@ def _music_for(conn: sqlite3.Connection, tweet_id: int) -> compose.MusicMatch | 
     return compose.MusicMatch(title=data["title"], artist=data["artist"])
 
 
-def _publish_short_reel(conn: sqlite3.Connection, sched_id: int, tweet_id: int) -> None:
+def _prepare(conn: sqlite3.Connection, tweet_id: int):
+    """Download + self-enrich + self-music-id. Returns (src_path, tweet_text, enrichment, music)."""
     row = conn.execute(
         "SELECT content, enrichment_json, music_json FROM tweets WHERE tweet_id=?",
         (tweet_id,),
@@ -145,16 +146,13 @@ def _publish_short_reel(conn: sqlite3.Connection, sched_id: int, tweet_id: int) 
     has_enrichment = bool(row and row[1])
     has_music = bool(row and row[2])
 
-    print(f"  publishing tweet {tweet_id}")
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-
     print(f"  → downloading media")
     paths = download_tweet_media(conn, tweet_id)
     if not paths:
         raise RuntimeError("no media downloaded")
     src = paths[0]
 
-    # Self-updating: enrich + music ID on the fly if missing
     if not has_enrichment:
         try:
             print(f"  → enriching (Vertex Gemini)")
@@ -185,6 +183,37 @@ def _publish_short_reel(conn: sqlite3.Connection, sched_id: int, tweet_id: int) 
 
     enrichment = _enrichment_for(conn, tweet_id)
     music = _music_for(conn, tweet_id)
+    return src, tweet_text, enrichment, music
+
+
+def _do_ig_publish(conn: sqlite3.Connection, transformed: Path, tweet_id: int,
+                   tweet_text: str, enrichment, music) -> str | None:
+    """Upload to IG + post the first-comment hashtag dump. Returns ig_media_id or None."""
+    ig_caption = compose.compose_reel(tweet_text, enrichment, music)
+    print(f"  → uploading to Instagram")
+    try:
+        ig_id = upload_reel(transformed, ig_caption)
+    except SystemExit as e:
+        print(f"  ⚠ IG upload failed: {e}")
+        return None
+    conn.execute(
+        "INSERT OR IGNORE INTO posts (tweet_id, platform, media_id, posted_at) "
+        "VALUES (?, 'ig_reel', ?, ?)",
+        (tweet_id, ig_id, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    # First-comment hashtag dump for extra reach
+    first_comment = compose.first_comment_hashtags(enrichment)
+    print(f"  → posting first-comment hashtag dump")
+    cid = post_comment(ig_id, first_comment)
+    if cid:
+        print(f"    comment posted: {cid}")
+    return ig_id
+
+
+def _publish_short_reel(conn: sqlite3.Connection, sched_id: int, tweet_id: int) -> None:
+    print(f"  publishing tweet {tweet_id} (stream=short_reel: YT + IG)")
+    src, tweet_text, enrichment, music = _prepare(conn, tweet_id)
 
     transformed = WORK_DIR / f"{tweet_id}_short.mp4"
     print(f"  → transforming to 9:16")
@@ -193,7 +222,6 @@ def _publish_short_reel(conn: sqlite3.Connection, sched_id: int, tweet_id: int) 
     yt_title = compose.compose_short_title(tweet_text, enrichment)
     yt_desc = compose.compose_short_description(tweet_text, enrichment, music)
     yt_tags = compose.compose_short_tags(enrichment)
-    ig_caption = compose.compose_reel(tweet_text, enrichment, music)
 
     print(f"  → uploading to YouTube")
     yt_id = upload_yt(transformed, yt_title, yt_desc, yt_tags, privacy="public")
@@ -204,20 +232,20 @@ def _publish_short_reel(conn: sqlite3.Connection, sched_id: int, tweet_id: int) 
     )
     conn.commit()
 
-    print(f"  → uploading to Instagram")
-    try:
-        ig_id = upload_reel(transformed, ig_caption)
-        conn.execute(
-            "INSERT OR IGNORE INTO posts (tweet_id, platform, media_id, posted_at) "
-            "VALUES (?, 'ig_reel', ?, ?)",
-            (tweet_id, ig_id, datetime.now(timezone.utc).isoformat()),
-        )
-        conn.commit()
-    except SystemExit as e:
-        ig_id = None
-        print(f"  ⚠ IG upload failed: {e}")
-
+    ig_id = _do_ig_publish(conn, transformed, tweet_id, tweet_text, enrichment, music)
     scheduler.mark_posted(conn, sched_id, yt_id=yt_id, ig_id=ig_id)
+
+
+def _publish_ig_only(conn: sqlite3.Connection, sched_id: int, tweet_id: int) -> None:
+    print(f"  publishing tweet {tweet_id} (stream=ig_only)")
+    src, tweet_text, enrichment, music = _prepare(conn, tweet_id)
+
+    transformed = WORK_DIR / f"{tweet_id}_short.mp4"
+    print(f"  → transforming to 9:16")
+    transform(src, transformed)
+
+    ig_id = _do_ig_publish(conn, transformed, tweet_id, tweet_text, enrichment, music)
+    scheduler.mark_posted(conn, sched_id, ig_id=ig_id)
 
 
 def _publish_yt_long(conn: sqlite3.Connection, sched_id: int, compilation_id: int) -> None:
@@ -272,6 +300,8 @@ def cmd_publish_due(args: argparse.Namespace) -> None:
         try:
             if stream == "short_reel":
                 _publish_short_reel(conn, sched_id, tweet_id)
+            elif stream == "ig_only":
+                _publish_ig_only(conn, sched_id, tweet_id)
             elif stream == "yt_long":
                 _publish_yt_long(conn, sched_id, compilation_id)
             else:

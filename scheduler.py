@@ -23,13 +23,20 @@ DB_PATH = ROOT / "data" / "seen.sqlite"
 IST = ZoneInfo("Asia/Kolkata")
 UTC = timezone.utc
 
-# (hour, minute) in IST for each slot
+# Growth schedule (5 slots/day, first 30 days then scale back):
+#   08:30 IST  short_reel  (IG Reel + YT Short cross-post — morning commute)
+#   13:00 IST  ig_only     (IG Reel only — lunch, conserve YT quota)
+#   15:30 IST  yt_long     (long-form compilation)
+#   19:30 IST  short_reel  (IG Reel + YT Short cross-post — prime time)
+#   22:30 IST  ig_only     (IG Reel only — late night scroll)
 SLOTS_IST = [
-    (9, 0),    # short_reel #1
-    (15, 0),   # yt_long
-    (20, 0),   # short_reel #2
+    (8, 30),
+    (13, 0),
+    (15, 30),
+    (19, 30),
+    (22, 30),
 ]
-SLOT_STREAMS = ["short_reel", "yt_long", "short_reel"]
+SLOT_STREAMS = ["short_reel", "ig_only", "yt_long", "short_reel", "ig_only"]
 JITTER_MINUTES = 30
 
 
@@ -156,7 +163,7 @@ def fill_upcoming(conn: sqlite3.Connection, hours: int = 48) -> int:
         if slot_hour in filled:
             continue
 
-        if slot.stream == "short_reel":
+        if slot.stream in ("short_reel", "ig_only"):
             tid = pick_next_short_reel(conn)
             if not tid:
                 continue
@@ -165,7 +172,7 @@ def fill_upcoming(conn: sqlite3.Connection, hours: int = 48) -> int:
                 INSERT INTO scheduled_posts (stream, tweet_id, scheduled_for, created_at)
                 VALUES (?, ?, ?, ?)
                 """,
-                ("short_reel", tid, slot.when_utc.isoformat(), now.isoformat()),
+                (slot.stream, tid, slot.when_utc.isoformat(), now.isoformat()),
             )
             added += 1
             filled.add(slot_hour)

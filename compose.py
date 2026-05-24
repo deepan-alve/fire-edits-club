@@ -1,7 +1,8 @@
 """Generate platform-specific captions, titles, descriptions, and tags.
 
-Three content streams:
+Content streams:
     short_reel   — IG Reel + YT Short (same copy, cross-posted)
+    ig_only      — IG Reel only (off-peak slots)
     yt_long      — YT long-form compilation
 
 Inputs:
@@ -9,9 +10,15 @@ Inputs:
     enrichment from enrich.py (subjects, fandoms, suggested hashtags/mentions)
     music match from music_id.py (song + artist, or None)
     compilation context (only for yt_long)
+
+Caption strategy (growth-tuned):
+    - Hook line uses enrichment subjects/fandoms when available
+    - CTAs drive saves + comments (the strongest IG algo signals)
+    - Hashtags split: ~8 in caption (fandom-specific), ~10 in first comment via IG API
 """
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass
 
@@ -35,11 +42,50 @@ SAFE_FANDOM_MENTIONS = {
     "formula 1": "@f1",
 }
 
-BASE_HASHTAGS_REEL = ["#edits", "#fireedits", "#viraledits", "#editsthatgohard", "#reels"]
-BASE_HASHTAGS_SHORT = ["#Shorts", "#edits", "#fireedits", "#viraledits", "#editsthatgohard"]
+BASE_HASHTAGS_REEL = ["#edits", "#fireedits", "#editsthatgohard"]
+BASE_HASHTAGS_SHORT = ["#Shorts", "#edits", "#fireedits", "#editsthatgohard"]
+# Dumped into first comment after IG publish (extends reach without cluttering caption)
+EXTRA_FIRST_COMMENT_HASHTAGS = [
+    "#viraledits", "#reelsindia", "#explorepage", "#editsoftheday",
+    "#aestheticedits", "#hardedits", "#trendingreels", "#fyp",
+    "#explore", "#reelitfeelit",
+]
 BASE_TAGS_YT = [
     "edits", "fire edits", "viral edits", "edits that go hard",
     "fireeditsclub", "edit compilation",
+]
+
+# Hook templates — random selection per post for variety
+HOOK_TEMPLATES_WITH_SUBJECT = [
+    "{subject} hits different 🔥",
+    "this {subject} edit goes insane",
+    "{subject} edit alert 🔥",
+    "POV: {subject} edits done right",
+    "the {subject} edit you needed today 🔥",
+    "wait for the {subject} drop 👀",
+]
+HOOK_TEMPLATES_FANDOM_ONLY = [
+    "{fandom} edits hit different 🔥",
+    "this {fandom} edit is unreal",
+    "POV: {fandom} fans on a Tuesday",
+    "{fandom} edit you didn't ask for but needed 🔥",
+]
+HOOK_TEMPLATES_GENERIC = [
+    "this one hits different 🔥",
+    "ok this goes hard 🔥",
+    "wait for it... 🔥",
+    "no thoughts just vibes 🔥",
+    "this edit is too clean 🔥",
+]
+
+# CTAs — pick 1-2 per post, rotate for variety
+CTA_POOL = [
+    "💾 save this for later",
+    "🏷 tag someone who needs to see this",
+    "💬 which one was your favorite?",
+    "🔥 follow @fireeditsclub for daily fire",
+    "👀 who else got chills?",
+    "🔄 share with the group chat",
 ]
 
 
@@ -81,14 +127,59 @@ def _safe_mentions(enrichment: Enrichment | None, confidence_floor: float = 0.85
 
 
 def _hashtags(enrichment: Enrichment | None, base: list[str], cap: int = 12) -> list[str]:
-    tags = list(base)
+    """Caption hashtags: fandom-specific first, base tags last. Keep tight (~8)."""
+    tags: list[str] = []
     if enrichment:
+        # Fandom-specific tags FIRST (these are the discoverability winners)
         for h in enrichment.suggested_hashtags:
             tag = h if h.startswith("#") else f"#{h}"
-            tag = re.sub(r"[^A-Za-z0-9#]", "", tag)
+            tag = re.sub(r"[^A-Za-z0-9#_]", "", tag)
             if tag not in tags and len(tag) > 1:
                 tags.append(tag)
+    # Brand/generic tags fill the rest
+    for t in base:
+        if t not in tags:
+            tags.append(t)
     return tags[:cap]
+
+
+def _hook(tweet_text: str, enrichment: Enrichment | None) -> str:
+    """Pick a hook line. Use enrichment when available, else tweet text, else generic."""
+    cleaned = _clean_text(tweet_text)
+    # If tweet has decent original text and not just emoji-only, prefer it
+    if cleaned and len(cleaned) >= 8 and not re.fullmatch(r"[\W_]+", cleaned):
+        return cleaned
+
+    if enrichment and enrichment.subjects:
+        subject = enrichment.subjects[0]
+        return random.choice(HOOK_TEMPLATES_WITH_SUBJECT).format(subject=subject)
+
+    if enrichment and enrichment.fandoms:
+        fandom = enrichment.fandoms[0]
+        # capitalize fandom for hook
+        return random.choice(HOOK_TEMPLATES_FANDOM_ONLY).format(fandom=fandom)
+
+    return random.choice(HOOK_TEMPLATES_GENERIC)
+
+
+def _ctas(n: int = 2) -> list[str]:
+    """Pick n random CTAs from the pool."""
+    return random.sample(CTA_POOL, min(n, len(CTA_POOL)))
+
+
+def first_comment_hashtags(enrichment: Enrichment | None = None) -> str:
+    """Build the first-comment hashtag dump (posted by instagram.py after publish)."""
+    tags = list(EXTRA_FIRST_COMMENT_HASHTAGS)
+    if enrichment:
+        # Add a few enrichment-derived tags that DIDN'T make the caption (overflow)
+        seen = {t.lower() for t in tags}
+        for h in enrichment.suggested_hashtags[8:14]:  # skip the first 8 (in caption)
+            tag = (h if h.startswith("#") else f"#{h}").lower()
+            tag = re.sub(r"[^A-Za-z0-9#_]", "", tag)
+            if tag not in seen and len(tag) > 1:
+                tags.append(tag)
+                seen.add(tag)
+    return " ".join(tags[:15])
 
 
 def compose_reel(
@@ -96,29 +187,30 @@ def compose_reel(
     enrichment: Enrichment | None = None,
     music: MusicMatch | None = None,
 ) -> str:
-    """Single-video Instagram Reel caption (also reused for YT Short description)."""
-    hook = _clean_text(tweet_text) or "this one goes hard 🔥"
+    """Single-video Instagram Reel caption — growth-tuned with hook + CTAs."""
+    hook = _hook(tweet_text, enrichment)
     mentions = " ".join(_safe_mentions(enrichment))
-    tags = " ".join(_hashtags(enrichment, BASE_HASHTAGS_REEL))
-    song_line = f"🎵 {music.title} — {music.artist}\n" if music else ""
+    tags = " ".join(_hashtags(enrichment, BASE_HASHTAGS_REEL, cap=10))
+    song_line = f"🎵 {music.title} — {music.artist}\n\n" if music else ""
+    ctas = "\n".join(_ctas(2))
     return (
         f"{hook}\n\n"
         f"{song_line}"
-        f"🎬 Originally by @editsgoeshard on X\n\n"
+        f"🎬 by @editsgoeshard on X\n\n"
+        f"{ctas}\n\n"
         f"{mentions}\n\n"
         f"{tags}"
     )
 
 
 def compose_short_title(tweet_text: str, enrichment: Enrichment | None = None) -> str:
-    """YouTube Short title — max 100 chars. Front-load keywords."""
-    base = _clean_text(tweet_text)
-    if not base:
-        if enrichment and enrichment.subjects:
-            base = f"{enrichment.subjects[0]} edit goes hard"
-        else:
-            base = "this edit goes hard"
-    title = f"{base} 🔥 #Shorts"
+    """YouTube Short title — max 100 chars. Front-load keywords + fandom."""
+    hook = _hook(tweet_text, enrichment)
+    # Append fandom hashtag to title for SEO when we have it
+    fandom_tag = ""
+    if enrichment and enrichment.fandoms:
+        fandom_tag = f" #{enrichment.fandoms[0].lower().replace(' ', '')}"
+    title = f"{hook} 🔥{fandom_tag} #Shorts"
     return title[:100]
 
 
@@ -128,16 +220,17 @@ def compose_short_description(
     music: MusicMatch | None = None,
 ) -> str:
     """YouTube Short description — up to 5000 chars but keep it tight, mobile-truncated."""
-    hook = _clean_text(tweet_text) or "this one goes hard 🔥"
+    hook = _hook(tweet_text, enrichment)
     mentions = " ".join(_safe_mentions(enrichment))
-    tags = " ".join(_hashtags(enrichment, BASE_HASHTAGS_SHORT))
-    song_line = f"🎵 {music.title} — {music.artist}\n" if music else ""
+    tags = " ".join(_hashtags(enrichment, BASE_HASHTAGS_SHORT, cap=10))
+    song_line = f"🎵 {music.title} — {music.artist}\n\n" if music else ""
+    ctas = "\n".join(_ctas(2))
     return (
         f"{hook}\n\n"
         f"{song_line}"
-        f"🎬 Originally by @EditsGoesHard on X\n"
-        f"Follow for daily fire edits 🔥\n\n"
-        f"IG: @fireeditsclub\n\n"
+        f"🎬 by @EditsGoesHard on X\n"
+        f"📲 IG: @fireeditsclub for daily fire 🔥\n\n"
+        f"{ctas}\n\n"
         f"{mentions}\n\n"
         f"{tags}"
     )
