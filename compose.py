@@ -111,8 +111,8 @@ def _clean_text(text: str | None) -> str:
 
 
 def _safe_mentions(enrichment: Enrichment | None, confidence_floor: float = 0.85) -> list[str]:
-    """Return only @EditsGoesHard + fandom mentions we're highly confident in + whitelisted."""
-    mentions = ["@editsgoeshard"]
+    """Fandom mentions only — confidence-gated + whitelisted. No source credit."""
+    mentions: list[str] = []
     if not enrichment:
         return mentions
     for fandom in enrichment.fandoms:
@@ -193,12 +193,12 @@ def compose_reel(
     tags = " ".join(_hashtags(enrichment, BASE_HASHTAGS_REEL, cap=10))
     song_line = f"🎵 {music.title} — {music.artist}\n\n" if music else ""
     ctas = "\n".join(_ctas(2))
+    mention_line = f"{mentions}\n\n" if mentions else ""
     return (
         f"{hook}\n\n"
         f"{song_line}"
-        f"🎬 by @editsgoeshard on X\n\n"
         f"{ctas}\n\n"
-        f"{mentions}\n\n"
+        f"{mention_line}"
         f"{tags}"
     )
 
@@ -225,13 +225,13 @@ def compose_short_description(
     tags = " ".join(_hashtags(enrichment, BASE_HASHTAGS_SHORT, cap=10))
     song_line = f"🎵 {music.title} — {music.artist}\n\n" if music else ""
     ctas = "\n".join(_ctas(2))
+    mention_line = f"{mentions}\n\n" if mentions else ""
     return (
         f"{hook}\n\n"
         f"{song_line}"
-        f"🎬 by @EditsGoesHard on X\n"
         f"📲 IG: @fireeditsclub for daily fire 🔥\n\n"
         f"{ctas}\n\n"
-        f"{mentions}\n\n"
+        f"{mention_line}"
         f"{tags}"
     )
 
@@ -273,8 +273,7 @@ def compose_compilation_description(
     lines = [
         f"The hardest {theme.lower()} edits, all in one place 🔥",
         "",
-        "🎬 All edits originally posted by @EditsGoesHard on X",
-        "Curated and compiled by Fire Edits Club",
+        "Curated and compiled by Fire Edits Club 🔥",
         "",
         "📲 Follow for daily fire edits:",
         "Instagram: @fireeditsclub",
