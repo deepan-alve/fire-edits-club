@@ -346,11 +346,36 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"  #{sid}  {when_ist}  {stream:>11s}  {ref}")
 
 
+def _cleanup_old_transient(max_age_hours: int = 6) -> None:
+    """Delete transient work/upload files older than max_age_hours.
+
+    media/ and compilations/ are intentionally kept — media may be reused for
+    future compilations, compilations are kept for the yt_long stream.
+    """
+    import time
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    for sub in ("work", "uploads"):
+        d = ROOT / "data" / sub
+        if not d.exists():
+            continue
+        for p in d.iterdir():
+            try:
+                if p.is_file() and p.stat().st_mtime < cutoff:
+                    p.unlink()
+                    removed += 1
+            except OSError:
+                pass
+    if removed:
+        print(f"cleanup: removed {removed} transient file(s) older than {max_age_hours}h")
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     print("=== TICK ===", datetime.now(timezone.utc).isoformat())
     cmd_scrape(argparse.Namespace(n=30))
     cmd_schedule(argparse.Namespace(hours=48))
     cmd_publish_due(args)
+    _cleanup_old_transient()
 
 
 def main() -> None:

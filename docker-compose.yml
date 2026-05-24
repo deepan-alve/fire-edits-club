@@ -11,9 +11,14 @@ services:
       - GCP_LOCATION=${GCP_LOCATION:-us-central1}
       - GOOGLE_APPLICATION_CREDENTIALS=/opt/firebot/secrets/vertex-sa.json
     volumes:
-      # Stable host paths that survive deploys (Dokploy wipes the compose code/ dir each time)
+      # SQLite + secrets stay on alveta's local disk (CIFS + SQLite = corruption risk).
       - /etc/dokploy/firebot/data:/opt/firebot/data
       - /etc/dokploy/firebot/secrets:/opt/firebot/secrets:ro
+      # Bulky video files go to the Hetzner Storage Box via CIFS (988G, plenty of headroom).
+      - /mnt/storagebox/firebot/media:/opt/firebot/data/media
+      - /mnt/storagebox/firebot/work:/opt/firebot/data/work
+      - /mnt/storagebox/firebot/compilations:/opt/firebot/data/compilations
+      - /mnt/storagebox/firebot/uploads:/opt/firebot/data/uploads
     # Cron-style loop: every 5 minutes run main.py and log output
     command: >
       sh -c "while true; do
@@ -27,7 +32,7 @@ services:
     container_name: firebot-media
     restart: unless-stopped
     volumes:
-      - /etc/dokploy/firebot/data/uploads:/usr/share/nginx/html:ro
+      - /mnt/storagebox/firebot/uploads:/usr/share/nginx/html:ro
     labels:
       - traefik.enable=true
       - traefik.http.routers.firebot-media.rule=Host(`media.fireeditsclub.deepanalve.dev`)
